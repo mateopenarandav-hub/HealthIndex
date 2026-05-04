@@ -7,7 +7,7 @@ st.set_page_config(page_title="Asset Health Index", layout="wide")
 st.title("⚡ Asset Health Index")
  
 # ─────────────────────────────────────────────────────────────────────────────
-# CONFIGURATION — set how many asset files users can upload
+# CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 MAX_ASSETS = 5   # ← change this to allow more or fewer asset files
  
@@ -15,6 +15,11 @@ MAX_ASSETS = 5   # ← change this to allow more or fewer asset files
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
+ 
+def fmt_pct(val):
+    """Format a 0–1 decimal as a percentage string with 1 decimal."""
+    return f"{val * 100:.1f}%"
+ 
  
 def parse_asset_file(file, asset_name):
     df = pd.read_excel(file)
@@ -38,6 +43,10 @@ def parse_asset_file(file, asset_name):
     hi_monthly = df_pivot.groupby("Month")["Weighted Score"].sum().reset_index()
     hi_monthly.rename(columns={"Weighted Score": "Health Index"}, inplace=True)
     hi_monthly["Asset"] = asset_name
+ 
+    # Convert to percentage
+    hi_monthly["Health Index %"] = hi_monthly["Health Index"] * 100
+    df_pivot["Score %"] = df_pivot["Score"] * 100
  
     last_month = hi_monthly["Month"].iloc[-1]
     baseline_hi = hi_monthly[hi_monthly["Month"] == last_month]["Health Index"].values[0]
@@ -73,10 +82,10 @@ def compute_adjusted_hi(asset_name, baseline_hi, asset_condition_weight,
         "Asset":                     asset_name,
         "Asset_Condition(Actual)":   asset_condition_actual,
         "Asset_Condition(Weight)":   asset_condition_weight,
-        "HealthIndex (Before)":      round(baseline_hi, 4),
-        "Max Deduction":             round(max_deduction, 4),
-        "HealthIndex (After)":       round(new_hi, 4),
-        "Delta":                     round(new_hi - baseline_hi, 4),
+        "HI Before %":               round(baseline_hi * 100, 1),
+        "Max Deduction %":           round(max_deduction * 100, 1),
+        "HI After %":                round(new_hi * 100, 1),
+        "Delta %":                   round((new_hi - baseline_hi) * 100, 1),
         "Worst Component":           worst.get("Componente", "—"),
         "Worst Condition":           worst["Condition"],
     }
@@ -84,7 +93,7 @@ def compute_adjusted_hi(asset_name, baseline_hi, asset_condition_weight,
  
  
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — upload all files
+# SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("📁 Upload Files")
@@ -170,19 +179,21 @@ with tab1:
  
     all_hi = pd.concat([a["hi_monthly"] for a in assets.values()], ignore_index=True)
  
-    fig = px.line(all_hi, x="Month", y="Health Index", color="Asset",
-                  markers=True, title="Health Index Trend — All Assets")
+    fig = px.line(all_hi, x="Month", y="Health Index %", color="Asset",
+                  markers=True, title="Health Index Trend — All Assets",
+                  labels={"Health Index %": "Health Index (%)"})
+    fig.update_yaxes(ticksuffix="%", range=[0, 100])
     st.plotly_chart(fig, use_container_width=True)
  
     st.markdown("### Last Month Summary")
     cols = st.columns(len(assets))
     for col, (name, a) in zip(cols, assets.items()):
-        col.metric(name, f"{a['baseline_hi']:.4f}")
+        col.metric(name, f"{a['baseline_hi'] * 100:.1f}%")
  
     st.markdown("### Monthly Health Index Table")
-    hi_table = all_hi.pivot_table(index="Month", columns="Asset", values="Health Index")
+    hi_table = all_hi.pivot_table(index="Month", columns="Asset", values="Health Index %")
     st.dataframe(
-        hi_table.style.format("{:.4f}"),
+        hi_table.style.format("{:.1f}%"),
         use_container_width=True
     )
  
@@ -195,21 +206,25 @@ with tab2:
     selected_asset = st.selectbox("Select asset", list(assets.keys()))
     a = assets[selected_asset]
  
-    fig_hi = px.line(a["hi_monthly"], x="Month", y="Health Index", markers=True,
-                     title=f"{selected_asset} — Health Index")
+    fig_hi = px.line(a["hi_monthly"], x="Month", y="Health Index %", markers=True,
+                     title=f"{selected_asset} — Health Index",
+                     labels={"Health Index %": "Health Index (%)"})
+    fig_hi.update_yaxes(ticksuffix="%", range=[0, 100])
     st.plotly_chart(fig_hi, use_container_width=True)
  
     col1, col2, col3 = st.columns(3)
-    col1.metric("HI Promedio", f"{a['hi_monthly']['Health Index'].mean():.4f}")
-    col2.metric("HI Mínimo",   f"{a['hi_monthly']['Health Index'].min():.4f}")
-    col3.metric("HI Máximo",   f"{a['hi_monthly']['Health Index'].max():.4f}")
+    col1.metric("HI Promedio", f"{a['hi_monthly']['Health Index %'].mean():.1f}%")
+    col2.metric("HI Mínimo",   f"{a['hi_monthly']['Health Index %'].min():.1f}%")
+    col3.metric("HI Máximo",   f"{a['hi_monthly']['Health Index %'].max():.1f}%")
  
     st.markdown("#### Indicator Scores")
     indicadores = a["df_pivot"]["Indicator"].unique()
     selected_ind = st.selectbox("Select indicator", indicadores, key="ind_select")
     df_ind = a["df_pivot"][a["df_pivot"]["Indicator"] == selected_ind]
-    fig_ind = px.line(df_ind, x="Month", y="Score", markers=True,
-                      title=f"{selected_asset} — {selected_ind} Score")
+    fig_ind = px.line(df_ind, x="Month", y="Score %", markers=True,
+                      title=f"{selected_asset} — {selected_ind} Score",
+                      labels={"Score %": "Score (%)"})
+    fig_ind.update_yaxes(ticksuffix="%", range=[0, 100])
     st.plotly_chart(fig_ind, use_container_width=True)
  
     with st.expander("📂 Raw Pivot Data"):
@@ -261,8 +276,10 @@ with tab3:
     st.subheader("📊 Adjusted Health Index — All Assets")
     cols = st.columns(len(summaries))
     for col, row in zip(cols, summaries):
-        col.metric(row["Asset"], f"{row['HealthIndex (After)']:.4f}",
-                   delta=f"{row['Delta']:.4f}", delta_color="inverse")
+        col.metric(row["Asset"],
+                   f"{row['HI After %']:.1f}%",
+                   delta=f"{row['Delta %']:.1f}%",
+                   delta_color="inverse")
  
     st.markdown("---")
  
@@ -275,27 +292,30 @@ with tab3:
         .format({
             "Asset_Condition(Actual)": "{:.3f}",
             "Asset_Condition(Weight)": "{:.3f}",
-            "HealthIndex (Before)":    "{:.4f}",
-            "Max Deduction":           "{:.4f}",
-            "HealthIndex (After)":     "{:.4f}",
-            "Delta":                   "{:.4f}",
+            "HI Before %":             "{:.1f}%",
+            "Max Deduction %":         "{:.1f}%",
+            "HI After %":              "{:.1f}%",
+            "Delta %":                 "{:.1f}%",
+            "Worst Condition":         "{:.3f}",
         })
-        .map(color_delta, subset=["Delta"]),
+        .map(color_delta, subset=["Delta %"]),
         use_container_width=True
     )
  
     # Before / after chart
     st.subheader("📉 Before vs After — All Assets")
-    chart_df = summary_df[["Asset", "HealthIndex (Before)", "HealthIndex (After)"]].melt(
-        id_vars="Asset", var_name="State", value_name="Health Index"
+    chart_df = summary_df[["Asset", "HI Before %", "HI After %"]].melt(
+        id_vars="Asset", var_name="State", value_name="Health Index %"
     )
     fig_ba = px.bar(
-        chart_df, x="Asset", y="Health Index", color="State", barmode="group",
-        text="Health Index",
-        color_discrete_map={"HealthIndex (Before)": "#3498db", "HealthIndex (After)": "#e74c3c"},
+        chart_df, x="Asset", y="Health Index %", color="State", barmode="group",
+        text="Health Index %",
+        color_discrete_map={"HI Before %": "#3498db", "HI After %": "#e74c3c"},
         title="Health Index — Before vs After Events",
+        labels={"Health Index %": "Health Index (%)"},
     )
-    fig_ba.update_traces(texttemplate="%{text:.4f}", textposition="outside")
+    fig_ba.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig_ba.update_yaxes(ticksuffix="%", range=[0, 100])
     st.plotly_chart(fig_ba, use_container_width=True)
  
     # Per-asset event detail
@@ -306,17 +326,17 @@ with tab3:
                        if e["Activo"].iloc[0].strip().lower() == selected_ev_asset.lower())
  
     k1, k2, k3 = st.columns(3)
-    k1.metric("HI Before",     f"{sel_summary['HealthIndex (Before)']:.4f}")
-    k2.metric("Max Deduction", f"{sel_summary['Max Deduction']:.4f}")
-    k3.metric("HI After",      f"{sel_summary['HealthIndex (After)']:.4f}",
-              delta=f"{sel_summary['Delta']:.4f}", delta_color="inverse")
+    k1.metric("HI Before",     f"{sel_summary['HI Before %']:.1f}%")
+    k2.metric("Max Deduction", f"{sel_summary['Max Deduction %']:.1f}%")
+    k3.metric("HI After",      f"{sel_summary['HI After %']:.1f}%",
+              delta=f"{sel_summary['Delta %']:.1f}%", delta_color="inverse")
  
     def color_ded(val):
         return "color: #e74c3c; font-weight:600"
  
     ev_display = sel_events.copy()
-    ev_display["Deduction"] = ev_display["Deduction"].round(6)
-    st.dataframe(ev_display.style.map(color_ded, subset=["Deduction"]), use_container_width=True)
+    ev_display["Deduction %"] = (ev_display["Deduction"] * 100).round(1)
+    st.dataframe(ev_display.style.map(color_ded, subset=["Deduction %"]), use_container_width=True)
  
     # Download
     st.markdown("---")
