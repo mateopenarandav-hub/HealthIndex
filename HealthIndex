@@ -1,0 +1,90 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+st.set_page_config(page_title="Transformer Health", layout="wide")
+
+st.title("⚡ Transformer Health Index")
+
+uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
+
+if uploaded_file is not None:
+
+    df = pd.read_excel(uploaded_file)
+
+    st.subheader("📂 Raw Data")
+    st.dataframe(df)
+
+    # ---------------------------
+    # Transformar estructura
+    # ---------------------------
+    df_melt = df.melt(id_vars=["Transformador"], 
+                      var_name="Month", 
+                      value_name="Value")
+
+    # Separar tipo de indicador
+    df_melt[["Indicator", "Type"]] = df_melt["Transformador"].str.extract(r"(.*)\((.*)\)")
+
+    # Pivot para tener columnas: Actual, Target, Score, Weight
+    df_pivot = df_melt.pivot_table(
+        index=["Month", "Indicator"],
+        columns="Type",
+        values="Value"
+    ).reset_index()
+
+    st.subheader("🔄 Data Transformada")
+    st.dataframe(df_pivot)
+
+    # ---------------------------
+    # Calcular Health Index
+    # ---------------------------
+    df_pivot["Weighted Score"] = df_pivot["Score"] * df_pivot["Weight"]
+
+    hi_monthly = df_pivot.groupby("Month")["Weighted Score"].sum().reset_index()
+    hi_monthly.rename(columns={"Weighted Score": "Health Index"}, inplace=True)
+
+    st.subheader("📊 Health Index Mensual")
+    st.dataframe(hi_monthly)
+
+    # ---------------------------
+    # Gráfico HI
+    # ---------------------------
+    fig = px.line(
+        hi_monthly,
+        x="Month",
+        y="Health Index",
+        markers=True,
+        title="Health Index Trend"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------
+    # Análisis por indicador
+    # ---------------------------
+    st.subheader("🔍 Indicadores")
+
+    indicadores = df_pivot["Indicator"].unique()
+    selected = st.selectbox("Selecciona indicador", indicadores)
+
+    df_ind = df_pivot[df_pivot["Indicator"] == selected]
+
+    fig2 = px.line(
+        df_ind,
+        x="Month",
+        y="Score",
+        markers=True,
+        title=f"{selected} Score"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # ---------------------------
+    # Métricas
+    # ---------------------------
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("HI Promedio", f"{hi_monthly['Health Index'].mean():.2f}")
+    col2.metric("HI Mínimo", f"{hi_monthly['Health Index'].min():.2f}")
+    col3.metric("HI Máximo", f"{hi_monthly['Health Index'].max():.2f}")
+
+else:
+    st.info("Sube el archivo Excel del transformador")
