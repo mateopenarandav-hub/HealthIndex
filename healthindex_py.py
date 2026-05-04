@@ -192,7 +192,7 @@ if uploaded_file is not None:
  
             styled = (
                 events_display.style
-                .applymap(color_deduction, subset=["Deduction"])
+                .map(color_deduction, subset=["Deduction"])
             )
             st.dataframe(styled, use_container_width=True)
  
