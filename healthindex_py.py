@@ -108,21 +108,13 @@ if uploaded_file is not None:
  
         if asset_cond_row.empty:
             st.warning(
-                "Could not find an **Asset_Condition(Actual)** indicator in your main file. "
-                "Make sure it exists as a row named like `Asset_Condition(Actual)` in your Excel."
+                "Could not find an **Asset_Condition** indicator in your main file."
             )
-            asset_condition_actual = None
-        else:
-            asset_condition_actual = asset_cond_row["Actual"].values[0]
+            st.stop()
  
-        # Build a simple asset_df with one row per indicator (Componente = Indicator)
-        asset_df = df_pivot[df_pivot["Month"] == last_month][["Indicator", "Actual", "Weight"]].copy()
-        asset_df = asset_df.rename(columns={
-            "Indicator": "Componente",
-            "Actual":    "Asset_Condition(Actual)",
-        })
-        asset_df["Activo"]      = "Transformador"
-        asset_df["HealthIndex"] = baseline_hi
+        # Asset_Condition weight and current actual value (from last month)
+        asset_condition_weight  = asset_cond_row["Weight"].values[0]
+        asset_condition_actual  = asset_cond_row["Actual"].values[0]
  
         # ── events file uploader ──────────────────────────────────────────────
         events_file = st.file_uploader(
@@ -142,10 +134,19 @@ if uploaded_file is not None:
                 st.error(f"Could not read file: {e}")
                 st.stop()
  
-            required_cols = {"Activo", "Componente", "Condition"}
+            required_cols = {"Activo", "Condition"}
             missing = required_cols - set(events_raw.columns)
             if missing:
                 st.error(f"Events file is missing columns: **{', '.join(missing)}**")
+                st.stop()
+ 
+            # Only keep events for this transformer
+            events_matched = events_raw[
+                events_raw["Activo"].str.strip().str.lower() == "transformador"
+            ].copy()
+ 
+            if events_matched.empty:
+                st.error("No events found for **Transformador** in the uploaded file.")
                 st.stop()
  
             with st.expander("📋 Uploaded Events", expanded=True):
@@ -153,24 +154,9 @@ if uploaded_file is not None:
  
             st.markdown("---")
  
-            # ── join Weight from asset_df into events ─────────────────────────
-            weight_lookup = asset_df[["Activo", "Componente", "Weight"]].drop_duplicates()
-            events_enriched = events_raw.merge(weight_lookup, on=["Activo", "Componente"], how="left")
- 
-            unmatched = events_enriched["Weight"].isna().sum()
-            if unmatched > 0:
-                st.warning(
-                    f"⚠️ {unmatched} event(s) could not be matched to an asset row "
-                    "(no matching Activo + Componente). They will be ignored."
-                )
-                events_enriched = events_enriched.dropna(subset=["Weight"])
- 
-            if events_enriched.empty:
-                st.error("No events matched your asset data. Check that Activo and Componente values align.")
-                st.stop()
- 
             # ── compute deductions ────────────────────────────────────────────
-            events_enriched["Deduction"] = events_enriched["Condition"] * events_enriched["Weight"]
+            # Each event deduction = Condition × Asset_Condition Weight
+            events_matched["Deduction"] = events_matched["Condition"] * asset_condition_weight
  
             worst = (
                 events_enriched
@@ -181,76 +167,81 @@ if uploaded_file is not None:
  
             result_df = asset_df.merge(worst, on=["Activo", "Componente"], how="left")
             result_df["MaxDeduction"]   = result_df["MaxDeduction"].fillna(0)
-            result_df["NewHealthIndex"] = (result_df["HealthIndex"] - result_df["MaxDeduction"]).clip(0, 100)
-            result_df["Delta"]          = result_df["NewHealthIndex"] - result_df["HealthIndex"]
+            # Worst event = max deduction across all components
+            max_deduction   = events_matched["Deduction"].max()
+            worst_event     = events_matched.loc[events_matched["Deduction"].idxmax()]
+            new_hi          = max(0, baseline_hi - max_deduction)
+            delta           = new_hi - baseline_hi
  
             # ── KPI row ───────────────────────────────────────────────────────
-            affected  = (result_df["Delta"] < 0).sum()
-            worst_row = result_df.loc[result_df["Delta"].idxmin()]
-            avg_drop  = result_df.loc[result_df["Delta"] < 0, "Delta"].mean()
- 
             k1, k2, k3 = st.columns(3)
-            k1.metric("Components Affected", affected)
-            k2.metric("Avg HI Drop", f"{avg_drop:.2f}" if affected else "—")
-            k3.metric(
-                "Worst Component",
-                worst_row["Componente"] if affected else "—",
-                delta=f"{worst_row['Delta']:.2f}" if affected else None,
-                delta_color="inverse",
-            )
+            k1.metric("Health Index (Before)", f"{baseline_hi:.4f}")
+            k2.metric("Max Deduction",         f"{max_deduction:.4f}")
+            k3.metric("Health Index (After)",  f"{new_hi:.4f}",
+                      delta=f"{delta:.4f}", delta_color="inverse")
  
             st.markdown("---")
  
-            # ── results table ─────────────────────────────────────────────────
-            st.subheader("📊 Adjusted Health Index per Component")
+            # ── worst event detail ────────────────────────────────────────────
+            st.subheader("⚠️ Worst Event (drives the deduction)")
+            st.dataframe(
+                events_matched.loc[[worst_event.name]],
+                use_container_width=True
+            )
  
-            display_cols = ["Activo", "Componente", "Asset_Condition(Actual)",
-                            "Weight", "HealthIndex", "MaxDeduction", "NewHealthIndex", "Delta"]
-            display = result_df[display_cols].copy()
+            # ── all events with their deductions ─────────────────────────────
+            st.subheader("📊 All Events & Deductions")
  
-            def color_delta(val):
-                return "color: #e74c3c; font-weight:600" if val < 0 else "color: #27ae60; font-weight:600"
+            def color_deduction(val):
+                return "color: #e74c3c; font-weight:600"
+ 
+            events_display = events_matched.copy()
+            events_display["Weight (Asset_Condition)"] = asset_condition_weight
+            events_display["Deduction"] = events_display["Deduction"].round(6)
  
             styled = (
-                display.style
-                .format({
-                    "Asset_Condition(Actual)": "{:.3f}",
-                    "Weight":                  "{:.3f}",
-                    "HealthIndex":             "{:.2f}",
-                    "MaxDeduction":            "{:.4f}",
-                    "NewHealthIndex":          "{:.2f}",
-                    "Delta":                   "{:.2f}",
-                })
-                .applymap(color_delta, subset=["Delta"])
-                .background_gradient(subset=["NewHealthIndex"], cmap="RdYlGn", vmin=0, vmax=100)
+                events_display.style
+                .applymap(color_deduction, subset=["Deduction"])
             )
             st.dataframe(styled, use_container_width=True)
  
-            # ── before / after HI chart ───────────────────────────────────────
+            # ── before / after chart ──────────────────────────────────────────
             st.subheader("📉 Before vs After Health Index")
             chart_df = pd.DataFrame({
-                "Componente":      result_df["Componente"],
-                "Before":          result_df["HealthIndex"],
-                "After":           result_df["NewHealthIndex"],
-            }).melt(id_vars="Componente", var_name="State", value_name="Health Index")
- 
+                "State":        ["Before Events", "After Events"],
+                "Health Index": [baseline_hi, new_hi],
+            })
             fig3 = px.bar(
                 chart_df,
-                x="Componente",
+                x="State",
                 y="Health Index",
                 color="State",
-                barmode="group",
-                color_discrete_map={"Before": "#3498db", "After": "#e74c3c"},
+                text="Health Index",
+                color_discrete_map={"Before Events": "#3498db", "After Events": "#e74c3c"},
                 title="Health Index — Before vs After Events",
             )
+            fig3.update_traces(texttemplate="%{text:.4f}", textposition="outside")
+            fig3.update_layout(showlegend=False, yaxis_range=[0, max(baseline_hi * 1.1, 1)])
             st.plotly_chart(fig3, use_container_width=True)
  
             # ── download ──────────────────────────────────────────────────────
             st.markdown("---")
+            summary_df = pd.DataFrame([{
+                "Activo":                    "Transformador",
+                "Asset_Condition(Actual)":   asset_condition_actual,
+                "Asset_Condition(Weight)":   asset_condition_weight,
+                "HealthIndex (Before)":      baseline_hi,
+                "Max Deduction":             max_deduction,
+                "HealthIndex (After)":       new_hi,
+                "Delta":                     delta,
+                "Worst Component":           worst_event.get("Componente", "—"),
+                "Worst Condition":           worst_event["Condition"],
+            }])
+ 
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                result_df[display_cols].to_excel(writer, index=False, sheet_name="Adjusted_HI")
-                events_raw.to_excel(writer, index=False, sheet_name="Events")
+                summary_df.to_excel(writer, index=False, sheet_name="Adjusted_HI")
+                events_matched.to_excel(writer, index=False, sheet_name="Events")
             buffer.seek(0)
  
             st.download_button(
