@@ -6,32 +6,27 @@ import io
 st.set_page_config(page_title="Asset Health Index", layout="wide")
 st.title("⚡ Asset Health Index")
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # CONFIGURATION
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 MAX_ASSETS = 5
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # HELPERS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 
-def fmt_pct(val):
-    return f"{val * 100:.1f}%"
-
-
-# 🔴🟠🟡🟢 HEALTH INDEX COLOR SCALE
 def hi_color(value):
     if value >= 85:
-        return "background-color: #006400; color: white;"   # verde oscuro
+        return "background-color: #006400; color: white;"
     elif value >= 70:
-        return "background-color: #7CFC00; color: black;"   # verde claro
+        return "background-color: #7CFC00; color: black;"
     elif value >= 50:
-        return "background-color: #FFD700; color: black;"   # amarillo
+        return "background-color: #FFD700; color: black;"
     elif value >= 30:
-        return "background-color: #FFA500; color: black;"   # naranja
+        return "background-color: #FFA500; color: black;"
     else:
-        return "background-color: #FF4C4C; color: white;"   # rojo
+        return "background-color: #FF4C4C; color: white;"
 
 
 def color_by_hi(v):
@@ -112,9 +107,9 @@ def compute_adjusted_hi(asset_name, baseline_hi, asset_condition_weight,
     }, asset_events
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # SIDEBAR
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 with st.sidebar:
     st.header("📁 Upload Files")
 
@@ -140,45 +135,61 @@ with st.sidebar:
             criticality_map[name] = st.select_slider(name, [1, 2, 3], value=1)
 
 
-# ─────────────────────────────────────────────────────────────
-# LOAD DATA
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# LOAD ASSETS (WITH SAFETY FIX)
+# ─────────────────────────────────────────────
 assets = {}
 
-for f in asset_files:
-    name = f.name.replace(".xlsx", "")
-    df_pivot, hi_monthly, baseline_hi, ac_w, ac_a = parse_asset_file(f, name)
+if asset_files:
+    for f in asset_files:
+        try:
+            name = f.name.replace(".xlsx", "")
+            df_pivot, hi_monthly, baseline_hi, ac_w, ac_a = parse_asset_file(f, name)
 
-    assets[name] = {
-        "df_pivot": df_pivot,
-        "hi_monthly": hi_monthly,
-        "baseline_hi": baseline_hi,
-        "ac_weight": ac_w,
-        "ac_actual": ac_a,
-        "criticality": criticality_map.get(name, 1),
-    }
+            assets[name] = {
+                "df_pivot": df_pivot,
+                "hi_monthly": hi_monthly,
+                "baseline_hi": baseline_hi,
+                "ac_weight": ac_w,
+                "ac_actual": ac_a,
+                "criticality": criticality_map.get(name, 1),
+            }
+
+        except Exception as e:
+            st.error(f"❌ Error loading {f.name}: {e}")
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# SAFETY CHECK (FIX ERROR)
+# ─────────────────────────────────────────────
+if not assets:
+    st.warning("No valid assets were loaded. Please check your Excel files.")
+    st.stop()
+
+
+# ─────────────────────────────────────────────
 # EVENTS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 events_raw = pd.read_excel(events_file) if events_file else None
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # TABS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["Overview", "Asset Detail", "Events"])
 
 
-# ═════════════════════════════════════════════════════════════
-# TAB 1
-# ═════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════
+# TAB 1 — OVERVIEW
+# ═════════════════════════════════════════════
 with tab1:
 
     st.subheader("Health Index Trend")
 
-    all_hi = pd.concat([a["hi_monthly"] for a in assets.values()])
+    all_hi = pd.concat(
+        [a["hi_monthly"] for a in assets.values()],
+        ignore_index=True
+    )
 
     all_hi["Color"] = all_hi["Health Index %"].apply(color_by_hi)
 
@@ -189,6 +200,7 @@ with tab1:
         color="Color",
         symbol="Asset"
     )
+
     fig.update_traces(mode="lines+markers")
     fig.update_yaxes(range=[0, 100], ticksuffix="%")
 
@@ -198,10 +210,10 @@ with tab1:
 
     overview = pd.DataFrame([
         {
-            "Asset": n,
+            "Asset": name,
             "HI (Last Month) %": a["baseline_hi"] * 100
         }
-        for n, a in assets.items()
+        for name, a in assets.items()
     ])
 
     st.dataframe(
@@ -212,23 +224,10 @@ with tab1:
         use_container_width=True
     )
 
-    st.subheader("Monthly Table")
 
-    hi_table = all_hi.pivot_table(
-        index="Month",
-        columns="Asset",
-        values="Health Index %"
-    )
-
-    st.dataframe(
-        hi_table.style.format("{:.1f}%").map(hi_color),
-        use_container_width=True
-    )
-
-
-# ═════════════════════════════════════════════════════════════
-# TAB 2
-# ═════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════
+# TAB 2 — ASSET DETAIL
+# ═════════════════════════════════════════════
 with tab2:
 
     asset = st.selectbox("Select asset", list(assets.keys()))
@@ -236,15 +235,18 @@ with tab2:
 
     fig = px.line(a["hi_monthly"], x="Month", y="Health Index %", markers=True)
     fig.update_yaxes(range=[0, 100], ticksuffix="%")
+
     st.plotly_chart(fig, use_container_width=True)
 
 
-# ═════════════════════════════════════════════════════════════
-# TAB 3
-# ═════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════
+# TAB 3 — EVENTS
+# ═════════════════════════════════════════════
 with tab3:
 
-    st.subheader("Events")
+    st.subheader("Events Data")
 
     if events_raw is not None:
         st.dataframe(events_raw, use_container_width=True)
+    else:
+        st.info("Upload events file to view data.")
