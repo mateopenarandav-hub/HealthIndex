@@ -182,7 +182,7 @@ with tab1:
     st.markdown("### Monthly Health Index Table")
     hi_table = all_hi.pivot_table(index="Month", columns="Asset", values="Health Index")
     st.dataframe(
-        hi_table.style.format("{:.4f}").background_gradient(cmap="RdYlGn", axis=None),
+        hi_table.style.format("{:.4f}"),
         use_container_width=True
     )
  
@@ -280,8 +280,7 @@ with tab3:
             "HealthIndex (After)":     "{:.4f}",
             "Delta":                   "{:.4f}",
         })
-        .map(color_delta, subset=["Delta"])
-        .background_gradient(subset=["HealthIndex (After)"], cmap="RdYlGn", axis=0),
+        .map(color_delta, subset=["Delta"]),
         use_container_width=True
     )
  
