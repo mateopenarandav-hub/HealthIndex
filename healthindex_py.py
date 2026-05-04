@@ -158,15 +158,6 @@ if uploaded_file is not None:
             # Each event deduction = Condition × Asset_Condition Weight
             events_matched["Deduction"] = events_matched["Condition"] * asset_condition_weight
  
-            worst = (
-                events_enriched
-                .groupby(["Activo", "Componente"], as_index=False)["Deduction"]
-                .max()
-                .rename(columns={"Deduction": "MaxDeduction"})
-            )
- 
-            result_df = asset_df.merge(worst, on=["Activo", "Componente"], how="left")
-            result_df["MaxDeduction"]   = result_df["MaxDeduction"].fillna(0)
             # Worst event = max deduction across all components
             max_deduction   = events_matched["Deduction"].max()
             worst_event     = events_matched.loc[events_matched["Deduction"].idxmax()]
