@@ -119,6 +119,21 @@ with st.sidebar:
         help="Must have columns: Activo, Condition.",
     )
  
+    # Criticality per asset (only shown once files are uploaded)
+    criticality_map = {}
+    if asset_files:
+        st.markdown("---")
+        st.markdown("**🔺 Asset Criticality**")
+        st.caption("1 = Low · 2 = Medium · 3 = High")
+        for f in asset_files[:MAX_ASSETS]:
+            aname = f.name.replace(".xlsx", "").replace(".XLSX", "")
+            criticality_map[aname] = st.select_slider(
+                aname,
+                options=[1, 2, 3],
+                value=1,
+                key=f"crit_{aname}",
+            )
+ 
 # ─────────────────────────────────────────────────────────────────────────────
 # GUARD
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,6 +156,7 @@ for f in asset_files:
             "baseline_hi": baseline_hi,
             "ac_weight":   ac_weight,
             "ac_actual":   ac_actual,
+            "criticality": criticality_map.get(asset_name, 1),
         }
     except ValueError as e:
         st.error(f"**{asset_name}:** {e}")
@@ -189,8 +205,18 @@ with tab1:
  
     st.markdown("### Last Month Summary")
     cols = st.columns(len(assets))
+    crit_labels = {1: "🟢 Low", 2: "🟡 Medium", 3: "🔴 High"}
     for col, (name, a) in zip(cols, assets.items()):
-        col.metric(name, f"{a['baseline_hi'] * 100:.1f}%")
+        col.metric(name, f"{a['baseline_hi'] * 100:.1f}%",
+                   help=f"Criticality: {crit_labels[a['criticality']]}")
+ 
+    # Asset overview table with criticality
+    overview = pd.DataFrame([{
+        "Asset":        name,
+        "Criticality":  crit_labels[a["criticality"]],
+        "HI (Last Month) %": round(a["baseline_hi"] * 100, 1),
+    } for name, a in assets.items()])
+    st.dataframe(overview, use_container_width=True, hide_index=True)
  
     st.markdown("### Monthly Health Index Table")
     hi_table = all_hi.pivot_table(index="Month", columns="Asset", values="Health Index %")
@@ -255,11 +281,13 @@ with tab3:
     summaries  = []
     all_events = []
  
+    crit_labels = {1: "🟢 Low", 2: "🟡 Medium", 3: "🔴 High"}
     for name, a in assets.items():
         summary, asset_events = compute_adjusted_hi(
             name, a["baseline_hi"], a["ac_weight"], a["ac_actual"], events_raw
         )
         if summary:
+            summary["Criticality"] = crit_labels[a["criticality"]]
             summaries.append(summary)
             all_events.append(asset_events)
  
@@ -289,8 +317,13 @@ with tab3:
     def color_delta(val):
         return "color: #e74c3c; font-weight:600" if val < 0 else "color: #27ae60; font-weight:600"
  
+    # Reorder columns so Criticality appears early
+    col_order = ["Asset", "Criticality", "HI Before %", "Max Deduction %",
+                 "HI After %", "Delta %", "Worst Component", "Worst Condition",
+                 "Asset_Condition(Actual)", "Asset_Condition(Weight)"]
+    col_order = [c for c in col_order if c in summary_df.columns]
     st.dataframe(
-        summary_df.style
+        summary_df[col_order].style
         .format({
             "Asset_Condition(Actual)": "{:.3f}",
             "Asset_Condition(Weight)": "{:.3f}",
