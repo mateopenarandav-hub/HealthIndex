@@ -155,6 +155,8 @@ events_raw = None
 if events_file:
     try:
         events_raw = pd.read_excel(events_file)
+        for col in events_raw.select_dtypes(include=["datetime64[ns]", "datetime64[us]"]).columns:
+            events_raw[col] = events_raw[col].dt.date
         missing_ev = {"Activo", "Condition"} - set(events_raw.columns)
         if missing_ev:
             st.error(f"Events file is missing columns: **{', '.join(missing_ev)}**")
