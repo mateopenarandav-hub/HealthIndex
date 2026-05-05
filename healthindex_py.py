@@ -21,6 +21,24 @@ def fmt_pct(val):
     return f"{val * 100:.1f}%"
  
  
+def color_hi(val):
+    """Background color for a Health Index % value (0–100 scale)."""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if v >= 85:
+        return "background-color: #27ae60; color: white; font-weight:600"   # Green
+    elif v >= 70:
+        return "background-color: #82e0aa; color: black; font-weight:600"   # Light green
+    elif v >= 50:
+        return "background-color: #f4d03f; color: black; font-weight:600"   # Yellow
+    elif v >= 30:
+        return "background-color: #e67e22; color: white; font-weight:600"   # Orange
+    else:
+        return "background-color: #e74c3c; color: white; font-weight:600"   # Red
+ 
+ 
 def parse_asset_file(file, asset_name):
     df = pd.read_excel(file)
     id_col = df.columns[0]
@@ -224,13 +242,21 @@ with tab1:
         "Criticality":  crit_labels[a["criticality"]],
         "HI (Last Month) %": round(a["baseline_hi"] * 100, 1),
     } for name, a in assets.items()])
-    st.dataframe(overview, use_container_width=True, hide_index=True)
+    st.dataframe(
+        overview.style
+        .format({"HI (Last Month) %": "{:.1f}%"})
+        .map(color_hi, subset=["HI (Last Month) %"]),
+        use_container_width=True,
+        hide_index=True,
+    )
  
     st.markdown("### Monthly Health Index Table")
     hi_table = all_hi.pivot_table(index="Month", columns="Asset", values="Health Index %")
     st.dataframe(
-        hi_table.style.format("{:.1f}%"),
-        use_container_width=True
+        hi_table.style
+        .format("{:.1f}%")
+        .map(color_hi),
+        use_container_width=True,
     )
  
 # ═════════════════════════════════════════════════════════════════════════════
@@ -359,7 +385,8 @@ with tab3:
     st.dataframe(
         summary_df[col_order].style
         .format(fmt)
-        .map(color_delta, subset=["Delta %"]),
+        .map(color_delta, subset=["Delta %"])
+        .map(color_hi, subset=["HI Before %", "HI After %"]),
         use_container_width=True,
         hide_index=True,
     )
