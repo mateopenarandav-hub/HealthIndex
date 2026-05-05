@@ -398,7 +398,13 @@ with tab3:
  
     ev_display = sel_events.copy()
     ev_display["Deduction %"] = (ev_display["Deduction"] * 100).round(1)
-    st.dataframe(ev_display.style.map(color_ded, subset=["Deduction %"]), use_container_width=True)
+    ev_display = ev_display.drop(columns=["Condition", "Deduction"], errors="ignore")
+    st.dataframe(
+        ev_display.style
+        .map(color_ded, subset=["Deduction %"])
+        .format({"Deduction %": "{:.1f}%"}),
+        use_container_width=True,
+    )
  
     # Download
     st.markdown("---")
