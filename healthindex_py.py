@@ -78,6 +78,11 @@ def compute_adjusted_hi(asset_name, baseline_hi, asset_condition_weight,
     new_hi = max(0.0, baseline_hi - max_deduction)
     worst = asset_events.loc[asset_events["Deduction"].idxmax()]
  
+    # Safely extract optional columns from the worst event
+    failure_mode       = worst.get("Modo de Falla", "—")
+    days_to_failure    = worst.get("DiasFalla", "—")
+    expected_fail_date = worst.get("FechaFalla", "—")
+ 
     summary = {
         "Asset":                     asset_name,
         "Asset_Condition(Actual)":   asset_condition_actual,
@@ -87,6 +92,9 @@ def compute_adjusted_hi(asset_name, baseline_hi, asset_condition_weight,
         "HI After %":                round(new_hi * 100, 1),
         "Delta %":                   round((new_hi - baseline_hi) * 100, 1),
         "Worst Component":           worst.get("Componente", "—"),
+        "Failure Mode":              failure_mode,
+        "Days to Failure":           days_to_failure,
+        "Expected Failure Date":     expected_fail_date,
         "Worst Condition":           worst["Condition"],
     }
     return summary, asset_events
@@ -302,6 +310,18 @@ with tab3:
  
     summary_df = pd.DataFrame(summaries)
  
+    # ── Format Expected Failure Date if it's a numeric Excel serial ──
+    def maybe_excel_date(val):
+        try:
+            if isinstance(val, (int, float)):
+                return pd.Timestamp("1899-12-30") + pd.Timedelta(days=int(val))
+            return val
+        except Exception:
+            return val
+ 
+    if "Expected Failure Date" in summary_df.columns:
+        summary_df["Expected Failure Date"] = summary_df["Expected Failure Date"].apply(maybe_excel_date)
+ 
     # KPI cards
     st.subheader("📊 Adjusted Health Index — All Assets")
     cols = st.columns(len(summaries))
@@ -313,28 +333,35 @@ with tab3:
  
     st.markdown("---")
  
-    # Summary table
+    # Summary table — requested columns only
     def color_delta(val):
         return "color: #e74c3c; font-weight:600" if val < 0 else "color: #27ae60; font-weight:600"
  
-    # Reorder columns so Criticality appears early
-    col_order = ["Asset", "Criticality", "HI Before %", "Max Deduction %",
-                 "HI After %", "Delta %", "Worst Component", "Worst Condition",
-                 "Asset_Condition(Actual)", "Asset_Condition(Weight)"]
+    col_order = [
+        "Asset",
+        "Criticality",
+        "HI Before %",
+        "HI After %",
+        "Delta %",
+        "Worst Component",
+        "Failure Mode",
+        "Days to Failure",
+        "Expected Failure Date",
+    ]
     col_order = [c for c in col_order if c in summary_df.columns]
+ 
+    fmt = {
+        "HI Before %":  "{:.1f}%",
+        "HI After %":   "{:.1f}%",
+        "Delta %":      "{:.1f}%",
+    }
+ 
     st.dataframe(
         summary_df[col_order].style
-        .format({
-            "Asset_Condition(Actual)": "{:.3f}",
-            "Asset_Condition(Weight)": "{:.3f}",
-            "HI Before %":             "{:.1f}%",
-            "Max Deduction %":         "{:.1f}%",
-            "HI After %":              "{:.1f}%",
-            "Delta %":                 "{:.1f}%",
-            "Worst Condition":         "{:.3f}",
-        })
+        .format(fmt)
         .map(color_delta, subset=["Delta %"]),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True,
     )
  
     # Before / after chart
