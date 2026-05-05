@@ -236,6 +236,34 @@ with tab1:
         col.metric(name, f"{a['baseline_hi'] * 100:.1f}%",
                    help=f"Criticality: {crit_labels[a['criticality']]}")
  
+    # ── Color Legend ──────────────────────────────────────────────────────────
+    with st.expander("ℹ️ Health Index Color Legend", expanded=False):
+        legend_df = pd.DataFrame([
+            {"Limit": "≥ 85%", "Color": "Green",       "Label": "Very Good", "Recommendation": "Continue maintenance plan"},
+            {"Limit": "≥ 70%", "Color": "Light Green",  "Label": "Good",      "Recommendation": "Monitor trend"},
+            {"Limit": "≥ 50%", "Color": "Yellow",       "Label": "Fair",      "Recommendation": "Increase diagnostic testing, possible replacement depending on criticality"},
+            {"Limit": "≥ 30%", "Color": "Orange",       "Label": "Poor",      "Recommendation": "Start planning process to replace"},
+            {"Limit": "< 30%", "Color": "Red",          "Label": "Very Poor", "Recommendation": "Immediately assess risk. Replace or rebuild based on assessment."},
+        ])
+ 
+        color_map = {
+            "Green":       "background-color: #27ae60; color: white",
+            "Light Green": "background-color: #82e0aa; color: black",
+            "Yellow":      "background-color: #f4d03f; color: black",
+            "Orange":      "background-color: #e67e22; color: white",
+            "Red":         "background-color: #e74c3c; color: white",
+        }
+ 
+        def style_legend_row(row):
+            css = color_map.get(row["Color"], "")
+            return [css if col == "Color" else "" for col in row.index]
+ 
+        st.dataframe(
+            legend_df.style.apply(style_legend_row, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
+ 
     # Asset overview table with criticality
     overview = pd.DataFrame([{
         "Asset":        name,
